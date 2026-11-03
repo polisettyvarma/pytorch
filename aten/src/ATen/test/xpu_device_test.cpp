@@ -2,6 +2,7 @@
 
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUDevice.h>
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 TEST(XpuDeviceTest, getDeviceProperties) {
@@ -61,4 +62,19 @@ TEST(XpuDeviceTest, getGlobalIdxFromDevice) {
 
   target_device = at::xpu::device_count();
   ASSERT_THROW(at::xpu::getGlobalIdxFromDevice(target_device), c10::Error);
+}
+
+TEST(XpuDeviceTest, getDeviceIndexFromGlobalIdx) {
+  if (!at::xpu::is_available()) {
+    return;
+  }
+
+  for (const auto device : c10::irange(at::xpu::device_count())) {
+    auto global_index = at::xpu::getGlobalIdxFromDevice(device);
+    EXPECT_EQ(at::xpu::getDeviceIndexFromGlobalIdx(global_index), device);
+  }
+
+  auto num_devices = static_cast<int32_t>(sycl::device::get_devices().size());
+  ASSERT_THROW(at::xpu::getDeviceIndexFromGlobalIdx(-1), c10::Error);
+  ASSERT_THROW(at::xpu::getDeviceIndexFromGlobalIdx(num_devices), c10::Error);
 }

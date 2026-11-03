@@ -181,8 +181,13 @@ Device dlDeviceToTorchDevice(
       return at::Device(DeviceType::HIP, index);
 #endif
     case DLDeviceType::kDLOneAPI:
-      TORCH_CHECK(data != nullptr, "Can't get ATen device for XPU without XPU data.");
-      return at::detail::getXPUHooks().getDeviceFromPtr(data);
+      // The DLPack device_id of kDLOneAPI is the global index of the device in
+      // sycl::device::get_devices(), see torchDeviceToDLDevice. Prefer the
+      // data pointer when available, otherwise map the global index back.
+      if (data != nullptr) {
+        return at::detail::getXPUHooks().getDeviceFromPtr(data);
+      }
+      return at::detail::getXPUHooks().getDeviceFromGlobalIdx(index);
     case DLDeviceType::kDLMAIA:
       return at::Device(DeviceType::MAIA, index);
     case DLDeviceType::kDLExtDev:

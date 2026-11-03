@@ -823,9 +823,12 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
         return 0;
       }
       if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
-        *out_stream = at::accelerator::getCurrentStream(
-                          static_cast<c10::DeviceIndex>(device_id))
-                          .native_handle();
+        // The DLPack device_id is not always the torch device index, e.g. it
+        // is the global SYCL device index for kDLOneAPI.
+        const auto device = at::dlDeviceToTorchDevice(
+            device_type, static_cast<c10::DeviceIndex>(device_id), nullptr);
+        *out_stream =
+            at::accelerator::getCurrentStream(device.index()).native_handle();
       }
       return 0;
     } catch (const std::exception& e) {

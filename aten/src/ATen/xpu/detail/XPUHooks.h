@@ -11,6 +11,7 @@ struct XPUHooks : public at::XPUHooksInterface {
   bool hasXPU() const override;
   std::string showConfig() const override;
   int32_t getGlobalIdxFromDevice(const at::Device& device) const override;
+  Device getDeviceFromGlobalIdx(int32_t global_idx) const override;
   const Generator& getDefaultGenerator(
       DeviceIndex device_index = -1) const override;
   Generator getNewGenerator(DeviceIndex device_index = -1) const override;

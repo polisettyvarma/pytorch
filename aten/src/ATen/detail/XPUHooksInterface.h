@@ -36,6 +36,10 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
+  virtual Device getDeviceFromGlobalIdx(int32_t /*global_idx*/) const {
+    TORCH_CHECK(false, "Cannot get XPU device from global device index without ATen_xpu library.");
+  }
+
   const Generator& getDefaultGenerator(
       [[maybe_unused]] DeviceIndex device_index = -1) const override {
     TORCH_CHECK(

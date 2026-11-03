@@ -1,6 +1,7 @@
 #include <ATen/xpu/XPUContext.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <deque>
 #include <vector>
@@ -76,6 +77,24 @@ int32_t getGlobalIdxFromDevice(DeviceIndex device) {
   check_device_index(device);
   c10::call_once(device_global_idx_flags[device], initDeviceGlobalIdx, device);
   return device_global_idxs[device];
+}
+
+// Return the index of the XPU device in the framework based on the global
+// index enumerated by sycl::device::get_devices(). This is the inverse of
+// getGlobalIdxFromDevice. The framework only enumerates a subset of the SYCL
+// devices, so a global index may not correspond to any XPU device.
+DeviceIndex getDeviceIndexFromGlobalIdx(int32_t global_idx) {
+  initXPUContextVectors();
+  for (const auto device : c10::irange(num_gpus)) {
+    if (getGlobalIdxFromDevice(device) == global_idx) {
+      return device;
+    }
+  }
+  TORCH_CHECK(
+      false,
+      "No XPU device corresponds to the global SYCL device index ",
+      global_idx,
+      ".");
 }
 
 // Check if a device can access the memory of a peer device directly.

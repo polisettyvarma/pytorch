@@ -1722,6 +1722,9 @@ class Tensor(torch._C.TensorBase):
             device_type = DLDeviceType.kDLCPU
         elif torch_device_type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
+            # The kDLOneAPI device_id is the global index of the device in
+            # sycl::device::get_devices(), matching the device in __dlpack__.
+            idx = torch._C._torchDeviceToDLDevice(device)[1]
         elif self.device.type == "privateuse1":
             device_type = DLDeviceType.kDLExtDev
         elif torch_device_type == "xla":

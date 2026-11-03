@@ -1852,6 +1852,112 @@ if __name__ == "__main__":
         restored_handle = module.get_xpu_work_stream(tensor, api_capsule)
         self.assertEqual(default_handle, restored_handle)
 
+    def test_dlpack_exchange_api_global_device_index(self):
+        """Test the DLPack Exchange API maps the kDLOneAPI device_id, which is the
+        global SYCL device index, back to the torch XPU device."""
+        from torch.utils import cpp_extension
+
+        api_capsule = torch.Tensor.__dlpack_c_exchange_api__
+
+        source = """
+        #include <torch/extension.h>
+        #include <ATen/dlpack.h>
+        #include <pybind11/pybind11.h>
+
+        namespace py = pybind11;
+
+        static const DLPackExchangeAPI* get_api(py::object api_obj) {
+            const DLPackExchangeAPI* api =
+                static_cast<const DLPackExchangeAPI*>(
+                    PyCapsule_GetPointer(api_obj.ptr(), "dlpack_exchange_api"));
+            TORCH_CHECK(api != nullptr, "API pointer is NULL");
+            return api;
+        }
+
+        int64_t get_dlpack_device_id(at::Tensor tensor, py::object api_obj) {
+            std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                THPVariable_Wrap(tensor), &Py_DecRef);
+            DLTensor dltensor;
+            int result = get_api(api_obj)->dltensor_from_py_object_no_sync(
+                py_obj.get(), &dltensor);
+            TORCH_CHECK(result == 0, "dltensor_from_py_object_no_sync failed");
+            TORCH_CHECK(dltensor.device.device_type == kDLOneAPI);
+            return dltensor.device.device_id;
+        }
+
+        uintptr_t get_xpu_work_stream(int64_t global_idx, py::object api_obj) {
+            void* stream_out = nullptr;
+            int result = get_api(api_obj)->current_work_stream(
+                kDLOneAPI, static_cast<int32_t>(global_idx), &stream_out);
+            TORCH_CHECK(result == 0, "current_work_stream failed");
+            return reinterpret_cast<uintptr_t>(stream_out);
+        }
+
+        at::Tensor allocate(int64_t global_idx, py::object api_obj) {
+            const DLPackExchangeAPI* api = get_api(api_obj);
+            int64_t shape[2] = {2, 3};
+            DLTensor prototype{};
+            prototype.data = nullptr;
+            prototype.device = {kDLOneAPI, static_cast<int32_t>(global_idx)};
+            prototype.ndim = 2;
+            prototype.dtype = {kDLFloat, 32, 1};
+            prototype.shape = shape;
+
+            DLManagedTensorVersioned* out = nullptr;
+            int result = api->managed_tensor_allocator(
+                &prototype, &out, nullptr,
+                [](void*, const char* kind, const char* message) {
+                    TORCH_CHECK(false, kind, ": ", message);
+                });
+            TORCH_CHECK(result == 0, "managed_tensor_allocator failed");
+            TORCH_CHECK(out->dl_tensor.device.device_type == kDLOneAPI);
+            TORCH_CHECK(out->dl_tensor.device.device_id == global_idx);
+            PyObject* py_obj = nullptr;
+            result = api->managed_tensor_to_py_object_no_sync(
+                out, reinterpret_cast<void**>(&py_obj));
+            TORCH_CHECK(result == 0, "managed_tensor_to_py_object_no_sync failed");
+            return py::reinterpret_steal<py::object>(py_obj).cast<at::Tensor>();
+        }
+        """
+
+        module = cpp_extension.load_inline(
+            name="test_xpu_dlpack_global_device_index",
+            cpp_sources=[source],
+            functions=["get_dlpack_device_id", "get_xpu_work_stream", "allocate"],
+            verbose=False,
+        )
+
+        for device in range(torch.xpu.device_count()):
+            # The kDLOneAPI device_id is the global SYCL device index, which
+            # may differ from the torch device index.
+            global_idx = module.get_dlpack_device_id(
+                torch.empty(1, device=f"xpu:{device}"), api_capsule
+            )
+            stream = torch.xpu.Stream(device=device)
+            with torch.xpu.stream(stream):
+                self.assertEqual(
+                    module.get_xpu_work_stream(global_idx, api_capsule),
+                    stream.sycl_queue,
+                )
+            out = module.allocate(global_idx, api_capsule)
+            self.assertEqual(out.device, torch.device("xpu", device))
+            self.assertEqual(out.shape, (2, 3))
+            self.assertEqual(out.dtype, torch.float32)
+
+    def test_dlpack_device_matches_capsule(self):
+        """__dlpack_device__ must report the same device as the __dlpack__ capsule,
+        whose kDLOneAPI device_id is the global SYCL device index."""
+        if self.expandable_segments:
+            self.skipTest("Skipping DLPack test for expandable segments allocator.")
+        for device in range(torch.xpu.device_count()):
+            x = torch.ones(4, device=f"xpu:{device}")
+            capsule_device = torch._C._torchDeviceToDLDevice(x.device)
+            self.assertEqual(tuple(map(int, x.__dlpack_device__())), capsule_device)
+            # Same-device import must not be treated as a cross-device copy.
+            z = torch.from_dlpack(x, device=x.device, copy=False)
+            self.assertEqual(z.device, x.device)
+            self.assertEqual(z.data_ptr(), x.data_ptr())
+
     @parametrize("copy", [None, True, False])
     def test_dlpack_conversion_with_device(self, copy):
         if self.expandable_segments:

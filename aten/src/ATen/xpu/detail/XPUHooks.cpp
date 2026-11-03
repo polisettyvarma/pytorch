@@ -32,6 +32,11 @@ int32_t XPUHooks::getGlobalIdxFromDevice(const at::Device& device) const {
   return at::xpu::getGlobalIdxFromDevice(device.index());
 }
 
+Device XPUHooks::getDeviceFromGlobalIdx(int32_t global_idx) const {
+  return Device(
+      DeviceType::XPU, at::xpu::getDeviceIndexFromGlobalIdx(global_idx));
+}
+
 const Generator& XPUHooks::getDefaultGenerator(DeviceIndex device_index) const {
   return at::xpu::detail::getDefaultXPUGenerator(device_index);
 }
